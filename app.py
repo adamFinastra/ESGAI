@@ -10,66 +10,60 @@ import itertools
 
 
 st.beta_set_page_config(page_title=None, page_icon="esg_ai_logo.png", layout='centered', initial_sidebar_state='auto')
-
 ####### Title ######
 col1, col2,col3 = st.beta_columns((1,1,1))
 image = Image.open('esg_ai_logo.png')
 logo = col2.image(image,width=250)
 st.markdown("<hr></hr>",unsafe_allow_html=True)
 
-#splash = st.empty()
-#splash.text("Please Load Report Data in sidebar...")
-
-
-companies = st.multiselect('Select Companies to Analyze',['Apple', 'Microsoft', 'Google', 'Publix'],[])
-date_range = st.slider("Select time period",value=[datetime(2020, 1, 1),datetime(2020, 12, 1)],format="MM/DD/YY")
-
-
-
-
-
-
-
-uploaded_file = st.sidebar.file_uploader("Choose a file", accept_multiple_files=True,type=['pdf'])
-
-
+###### LOAD DATA ######
 @st.cache(show_spinner=False,suppress_st_warning=True)
-def data_loading(uploaded_file):
-	files_info = []
+def load_data(): 
+	df_conn = pd.read_csv("Data/connections.csv")
+	df_data = pd.read_csv("Data/dec1dec2sample.csv",parse_dates=['DATE'],infer_datetime_format=True)
+	df_data["DATE"] = df_data["DATE"].dt.date
+	companies = df_data.Organization.unique().tolist()
+	companies.insert(0,"Select a Company")
+	return df_conn, df_data, companies
 
-	if uploaded_file is not None and uploaded_file != []:
-		splash.text("Processing Documents")
-		N = int(100.0/len(uploaded_file))
-		my_bar = st.progress(0)
-		time.sleep(0.1)
-		for idx,i in enumerate(uploaded_file): 
-			filename = i.name.replace(".pdf","")
-			pdf = PyPDF2.PdfFileReader(i)  
-			numPages = pdf.getNumPages()
-			text = [pdf.getPage(i).extractText() for i in range(0, numPages)]
-			text = "\n".join(text)
-			numWords = []
-			for sentences in text: 
-				numWords.append(len(sentences.split()))
-			files_info.append([filename,pdf,numPages,text,sum(numWords)])
-			my_bar.progress(int(N*(idx+1)))
-		df_files = pd.DataFrame(files_info,columns=['company','pdf_object','num_pages','content','num_words'])
-		df_files['estimated_time'] = df_files.num_words.apply(lambda i: str(i/200.0)+ ' mins')
-		data_success = st.success('Done!')
-		time.sleep(0.5)
-		my_bar.empty()
-		data_success.empty()
-	return df_files
+df_conn, df_data,companies= load_data()
 
-if uploaded_file is not None and uploaded_file != []:
-	df_files = data_loading(uploaded_file)
-	splash.empty()
 
-	my_expander = st.beta_expander("PDF Report Comparison")
-	#my_expander.write('')
-	with my_expander:
-		col1, col2 = st.beta_columns(2)
-		col1.header("Data")
-		col1.write(df_files[["company","num_pages","num_words","estimated_time"]])
 
-		col2.header("Visualization")
+#When a Company is slected show and run the following
+company = st.selectbox('Select Companies to Analyze',companies)
+date_slider = st.empty()
+if company and company != "Select a Company":
+
+	#Filter data to company 
+	df_company = df_data[df_data.Organization == company]
+
+	#Create date widget
+	start = df_company.DATE.min()
+	end = df_company.DATE.max()
+	selected_dates = st.date_input("Select a Date Range", value=[start,end], min_value=start, max_value=end, key=None)
+	start,end = selected_dates
+	
+	#Filter company data to dates 
+	print(start,end)
+	df_company = df_company[(df_company.DATE >= start) & (df_company.DATE <= end)]
+	print(df_company.shape)
+
+	#Create ESG Tone over time 
+	st.write("<br>",unsafe_allow_html=True)
+	st.write("<center><h3>ESG Trend Over Time</h3></center>",unsafe_allow_html=True)
+	st.write("<br>",unsafe_allow_html=True)
+	col1,col2 = st.beta_columns((1,3))
+
+
+
+
+	#Create Altair Chart of EST Tone over Time
+	line_metric = col1.radio("Choose Metric",options=["Tone","NegativeTone","PositiveTone","Polarity","ActivityDensity","WordCount"])
+
+	df_metr = pd.DataFrame(df_company.groupby(["DATE"])[line_metric].mean().reset_index(),columns=['DATE',line_metric])
+	df_metr["DATE"] = pd.to_datetime(df_metr.DATE)
+	esg_tone_chart = alt.Chart(df_metr).mark_line(point=True).encode(alt.X('yearmonthdate(DATE):O', title='DATE'),y=line_metric,tooltip=['DATE',line_metric]).interactive()
+	col2.altair_chart(esg_tone_chart,use_container_width=True)
+
+
