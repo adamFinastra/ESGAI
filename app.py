@@ -10,9 +10,12 @@ import networkx as nx
 import nx_altair as nxa
 
 
-st.set_page_config(page_title=None, page_icon="esg_ai_logo.png", layout='centered', initial_sidebar_state='auto')
+st.set_page_config(page_title="ESG AI", page_icon="esg_ai_logo.png",
+                   layout='centered', initial_sidebar_state='auto')
+
 #Article Filtering Categories for E, S, and G in the sidebar
-esg_categories = st.sidebar.multiselect("Select News Categories",["E","S","G"],["E","S","G"])
+esg_categories = st.sidebar.multiselect("Select News Categories", 
+                                        ["E", "S", "G"], ["E", "S", "G"])
 
 ####### Title ######
 col1, col2,col3 = st.beta_columns((1,1,1))
@@ -159,10 +162,11 @@ if company and company != "Select a Company":
         "Neighbor": company_df[[f"n{i}_rec" for i in range(num_neighbors)]].values[0],
         "Confidence": company_df[[f"n{i}_conf" for i in range(num_neighbors)]].values[0]
         })#.sort_values(by="Confidence", ascending=False)
-    conf_plot = alt.Chart(neighbor_conf).mark_bar().encode(
-        x=alt.X("Confidence:Q", sort="-x"),
-        y="Neighbor:N",
-        tooltip=["Confidence"]
+    conf_plot = alt.Chart(neighbor_conf, title="Neighbors").mark_bar().encode(
+        x="Confidence:Q",
+        y=alt.Y("Neighbor:N", sort="-x"),
+        tooltip=["Confidence"],
+        color=alt.Color("Confidence:Q", scale=alt.Scale(scheme="purplered")), 
     )
     st.altair_chart(conf_plot, use_container_width=True)
     # st.table(neighbor_conf)
