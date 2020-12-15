@@ -9,22 +9,15 @@ import itertools
 import networkx as nx
 import nx_altair as nxa
 from Graph import graph_creator
+import plotly.express as px
 
 
-st.set_page_config(page_title="ESG AI", page_icon="esg_ai_logo.png",
+st.set_page_config(page_title="ESG AI", page_icon="esg_ai_logo_1.png",
                    layout='centered', initial_sidebar_state='auto')
-
-#Article Filtering Categories for E, S, and G in the sidebar
-esg_categories = st.sidebar.multiselect("Select News Categories",
-                                        ["E", "S", "G"], ["E", "S", "G"])
-
-####### Title ######
-col1, col2,col3 = st.beta_columns(3)
-col2.image("esg_ai_logo.png", width=250)
-st.markdown("<hr></hr>", unsafe_allow_html=True)
-
+st.image("esg_ai_logo.png", use_container_width=True)
 ###### LOAD DATA ######
-@st.cache(show_spinner=False,suppress_st_warning=True)
+@st.cache(show_spinner=False, suppress_st_warning=True,
+          allow_output_mutation=True)
 def load_data():
     df_conn = pd.read_csv("Data/newGconnections_10days.csv")
     df_data = pd.read_csv("Data/10daysample.csv",parse_dates=['DATE'],infer_datetime_format=True)
@@ -35,6 +28,15 @@ def load_data():
     return df_conn, df_data, companies, embeddings
 
 df_conn, df_data,companies, embeddings = load_data()
+
+####### Title ######
+col1, col2, col3 = st.beta_columns(3)
+# st.image("esg_ai_logo.png", width=200)
+# # st.markdown("<hr></hr>", unsafe_allow_html=True)
+
+####### Sidebar ######
+esg_categories = st.sidebar.multiselect("Select News Categories",
+                                        ["E", "S", "G"], ["E", "S", "G"])
 
 
 #Filter companies by esg category and start and end date
@@ -60,16 +62,16 @@ def filter_publisher(df_company,publisher):
 
 
 #Create ESG Tone over time
-st.write("<br>",unsafe_allow_html=True)
-st.write("<center><h3>ESG Trend Over Time</h3></center>",
-         unsafe_allow_html=True)
-st.write("<br>",unsafe_allow_html=True)
+# st.write("<br>",unsafe_allow_html=True)
+# st.write("<center><h3>ESG Trend Over Time</h3></center>",
+#          unsafe_allow_html=True)
+# st.write("<br>",unsafe_allow_html=True)
 col1,col2 = st.beta_columns((1,3))
 
 
 ###### RUN COMPUTATIONS WHEN A COMPANY IS SELECTED ######
 #When a Company is slected show and run the following
-company = st.selectbox("Select Companies to Analyze", companies)
+company = st.selectbox("Select a Company to Analyze", companies)
 date_slider = st.empty()
 if company and company != "Select a Company":
 
@@ -125,7 +127,7 @@ if company and company != "Select a Company":
     st.write("<br><br>", unsafe_allow_html=True)
 
     #Scatter plot of all articles for the time period
-    c = alt.Chart(df_company).mark_circle().encode(
+    c = alt.Chart(df_company, title="Article Tone").mark_circle().encode(
         x="NegativeTone:Q",
         y="PositiveTone:Q",
         size="WordCount:Q",
@@ -143,36 +145,35 @@ if company and company != "Select a Company":
     st.altair_chart(c, use_container_width=True)
 
 
-
-    ###### Network Graph ######
-    #G = nx.Graph()
-    num_neighbors = st.slider("Number of Neighbors", 1, 20, value=8)
+    num_neighbors = st.slider("Number of Connections", 1, 20, value=8)
     neighbor_cols = [f"n{i}_rec" for i in range(num_neighbors)]
     company_df = df_conn[df_conn.company == company]
-    neighbors = company_df[neighbor_cols]
-    neighbors = company_df[neighbor_cols]
-    df2 = df_data[df_data.Organization.isin(neighbors.values[0])]
-    grph = graph_creator(df2)
-    G = grph.create_graph()
-    for n in G.edges():
-        print(G.edges[n])
-
-    pos = nx.spring_layout(G)
-    viz = nxa.draw_networkx(G, pos=pos,
-    width='weight',
-    edge_color='purple',
-    node_tooltip=['Source:N'])
-    st.altair_chart(viz.interactive(), use_container_width=True)
+    neighbors = company_df[neighbor_cols].iloc[0]
 
 
+    ###### Horizontal Neighbor Similarity Chart ######
     neighbor_conf = pd.DataFrame({
-        "Neighbor": neighbor_cols,
+        "Neighbor": neighbors,
         "Confidence": company_df[[f"n{i}_conf" for i in range(num_neighbors)]].values[0]
         })
-    conf_plot = alt.Chart(neighbor_conf, title="Neighbors").mark_bar().encode(
+    conf_plot = alt.Chart(neighbor_conf, title="Connected Companies"
+                          ).mark_bar().encode(
         x="Confidence:Q",
         y=alt.Y("Neighbor:N", sort="-x"),
         tooltip=["Neighbor", alt.Tooltip("Confidence", format=".3f")],
         color=alt.Color("Confidence:Q", scale=alt.Scale(scheme="purplered")),
     ).configure_axis(grid=False)
     st.altair_chart(conf_plot, use_container_width=True)
+
+    ###### EMBEDDING 3D PLOT ######
+    # company_list = [company] + neighbors.to_list()
+    color_f = lambda f: f"Company: {company.title()}" if f == company else (
+        "Connected Company" if f in neighbors.values else "Other Company")
+    embeddings["colorCode"] = embeddings.company.apply(color_f)
+    print(embeddings.query("company=='visa'"))
+    fig_3d = px.scatter_3d(embeddings, x="0", y="1", z="2", color='colorCode',
+                           color_discrete_sequence=["lightgrey", "#C137A2",
+                           "#694ED6"], opacity=0.5,
+                           hover_data={"company": True, "colorCode": True,
+                                       "0": False, "1": False, "2": False})
+    st.plotly_chart(fig_3d, use_container_width=True)
