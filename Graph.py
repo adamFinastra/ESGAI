@@ -1,10 +1,10 @@
-import pandas as import pd
+import pandas as pd
 import numpy as np
 import networkx as nx
 import itertools
 
 class graph_creator:
-  def __init__(df2):
+  def __init__(self, df2):
     self.df2 = df2
 
   def create_graph(self):
@@ -32,6 +32,6 @@ class graph_creator:
       return map[row.Source,row.Dest]
     df_edge["weight"] = df_edge[["Source","Dest"]].apply(lambda i: get_weight(i,map),axis=1)
     self.organizations = list(set(df_edge.Source.tolist()).union(set(df_edge.Dest.tolist())))
-    self.G = nx.from_pandas_edgelist(df_edge, 'Source', 'Dest',
-                                create_using=nx.Graph(), edge_attr='weight')
-    return G
+    self.G = nx.from_pandas_edgelist(df_edge, source='Source', target='Dest',
+        edge_attr='weight', create_using=nx.Graph())
+    return self.G
