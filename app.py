@@ -10,6 +10,8 @@ import itertools
 import plotly.express as px
 from plot_setup import finastra_theme
 from download_data import Data
+import sys
+
 
 ####### CACHED FUNCTIONS ######
 @st.cache(show_spinner=False, suppress_st_warning=True)
@@ -27,9 +29,8 @@ def filter_company_data(df_company, esg_categories, start, end):
 
 @st.cache(show_spinner=False, suppress_st_warning=True,
           allow_output_mutation=True)
-def load_data():
-    data = Data().read("ten_days")
-    # data = Data().read("one_month")
+def load_data(time_period):
+    data = Data().read(time_period)
     companies = data["data"].Organization.sort_values().unique().tolist()
     companies.insert(0,"Select a Company")
     return data, companies
@@ -60,7 +61,8 @@ def filter_on_date(df, start, end, date_col="DATE"):
             (df[date_col] <= pd.to_datetime(end))]
     return df
 
-def main(start, end):
+
+def main(time_period):
     ###### CUSTOMIZE COLOR THEME ######
     alt.themes.register("finastra", finastra_theme)
     alt.themes.enable("finastra")
@@ -81,7 +83,7 @@ def main(start, end):
 
     ###### LOAD DATA ######
     with st.spinner(text="Fetching Data..."):
-        data, companies = load_data()
+        data, companies = load_data(time_period)
     df_conn = data["conn"]
     df_data = data["data"]
     embeddings = data["embed"]
@@ -340,42 +342,19 @@ def main(start, end):
         st.altair_chart(conf_plot, use_container_width=True)
 
 
-        # ###### CHART: ESG RADAR ######
-        # avg_esg = data["ESG"]
-        # avg_esg.rename(columns={"Unnamed: 0": "Type"}, inplace=True)
-        # avg_esg.replace({"T": "Overall", "E": "Environment",
-        #                  "S": "Social", "G": "Governance"}, inplace=True)
-        # avg_esg["Industry Average"] = avg_esg.mean(axis=1)
-        #
-        # radar_df = avg_esg[["Type", company, "Industry Average"]].melt("Type",
-        #     value_name="score", var_name="entity")
-        #
-        # radar = px.line_polar(radar_df, r="score", theta="Type",
-        #     color="entity", line_close=True, hover_name="Type",
-        #     hover_data={"Type": True, "entity": True, "score": ":.2f"},
-        #     color_discrete_map={"Industry Average": fuchsia, company: violet})
-        # radar.update_layout(template=None,
-        #                     polar={
-        #                            "radialaxis": {"showticklabels": False,
-        #                                           "ticks": ""},
-        #                            "angularaxis": {"showticklabels": False,
-        #                                            "ticks": ""},
-        #                            },
-        #                     legend={"title": None, "yanchor": "middle",
-        #                             "orientation": "h"},
-        #                     title={"text": "<b>ESG Scores</b>",
-        #                            "x": 0.5, "y": 0.9,
-        #                            "xanchor": "center",
-        #                            "yanchor": "top",
-        #                            "font": {"family": "Futura", "size": 23}},
-        #                     margin={"l": 5, "r": 5, "t": 100, "b": 100},
-        #                     )
-        # # radar.update_traces(fill="toself")
-        # p2.plotly_chart(radar, use_container_width=True)
-
+if __name__ == "__main__":
+    args = sys.argv
+    if len(args) == 1:
+        time_period = "ten_days"
+    else:
+        time_period = args[1]
+    if time_period not in ["ten_days", "one_month"]:
+        print("NOT A VALID PERIOD! Pick one of \n    ten_days\n    one_month")
+        sys.exit()
+        st.stop()
+    else:
+        main(time_period)
     alt.themes.enable("default")
 
-if __name__ == "__main__":
-    start_date = "dec1"
-    end_date = "dec10"
-    main(start_date, end_date)
+
+# one_month, ten_days

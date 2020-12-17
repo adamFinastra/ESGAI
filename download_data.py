@@ -21,8 +21,8 @@ class Data:
     def read(self, time_period="ten_days"):
         if time_period == "ten_days":
             data_path = os.path.join("Data", "dec1_to_dec10")
-        # elif time_period == "one_month":
-        #     data_path = os.path.join("Data", "nov11_to_dec12")
+        elif time_period == "one_month":
+            data_path = os.path.join("Data", "nov11_to_dec12")
         else:
             print("We don't have data for that")
             return
