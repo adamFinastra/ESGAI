@@ -4,34 +4,32 @@ import networkx as nx
 import itertools
 
 class graph_creator:
-  def __init__(self, df2):
-    self.df2 = df2
+    def __init__(self, df):
+        self.df = df
 
-  def create_graph(self):
-    df_edge = pd.DataFrame(self.df2.groupby("URL").Organization.apply(list))
-    df_edge = df_edge.reset_index()
+    def create_graph(self):
+        # Find Edges
+        df_edge = pd.DataFrame(self.df.groupby("URL").Organization.apply(list)
+                               ).reset_index()
 
-    def get_tuples(row):
-      if len(row) > 1:
-        return list(itertools.combinations(row,2))
-      else:
-        return None
+        get_tpls = lambda r: (list(itertools.combinations(r, 2)) if
+                              len(r) > 1 else None)
+        df_edge["SourceDest"] = df_edge.Organization.apply(get_tpls)
+        df_edge = df_edge.explode("SourceDest").dropna(subset=["SourceDest"])
 
-    def get_i(row,i):
-      return row[i]
+        edges = df_edge.SourceDest.values
+        G.add_edges_from(edges)
 
-    df_edge["SourceDest"] = df_edge.Organization.apply(lambda i: get_tuples(i))
-    df_edge = df_edge.explode("SourceDest")
-    df_edge = df_edge[~df_edge.SourceDest.isnull()]
-    df_edge["Source"] = df_edge.SourceDest.apply(lambda i: get_i(i,0))
-    df_edge["Dest"] = df_edge.SourceDest.apply(lambda i: get_i(i,1))
-    df_edge = df_edge[["Source","Dest"]]
-    edges = [tuple(r) for r in df_edge.to_numpy()]
-    map = df_edge.groupby(['Source', 'Dest']).size()
-    def get_weight(row,map):
-      return map[row.Source,row.Dest]
-    df_edge["weight"] = df_edge[["Source","Dest"]].apply(lambda i: get_weight(i,map),axis=1)
-    self.organizations = list(set(df_edge.Source.tolist()).union(set(df_edge.Dest.tolist())))
-    self.G = nx.from_pandas_edgelist(df_edge, source='Source', target='Dest',
-        edge_attr='weight', create_using=nx.Graph())
-    return self.G
+        # Get Weights
+        source_dest = pd.DataFrame(df_edge.SourceDest.tolist(),
+                                   columns=["Source", "Dest"])
+        sd_mapping = source_dest.groupby(["Source", "Dest"]).size()
+        get_weight = lambda r: sd_mapping[r.Source, r.Dest]
+        source_dest["weight"] = source_dest.apply(get_weight, axis=1)
+
+        # Get
+        self.organizations = set(source_dest.Source.unique()).union(
+                             set(source_dest.Dest.unique()))
+        self.G = nx.from_pandas_edgelist(source_dest, source="Source",
+            target="Dest", edge_attr="weight", create_using=nx.Graph)
+        return self.G
