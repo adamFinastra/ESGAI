@@ -312,20 +312,21 @@ def main(start, end):
                          "S": "Social", "G": "Governance"}, inplace=True)
         avg_esg["Industry Average"] = avg_esg.mean(axis=1)
 
-        radar_df = avg_esg[["Type", company, "Industry Average"]].melt("Type")
+        radar_df = avg_esg[["Type", company, "Industry Average"]].melt("Type",
+            value_name="score", var_name="entity")
 
-        radar = px.line_polar(radar_df, r="value", theta="Type",
-            color="variable", line_close=True, hover_name="Type",
+        radar = px.line_polar(radar_df, r="score", theta="Type",
+            color="entity", line_close=True, hover_name="Type",
+            hover_data={"Type": False, "entity": True, "score": ":.5f"},
             color_discrete_map={"Industry Average": fuchsia, company: violet})
-        # radar.update_traces(fill="toself")
         radar.update_layout(template=None,
                             polar={
-                                   # "bgcolor": "white",
                                    "radialaxis": {"showticklabels": False,
                                                   "ticks": ""},
-                                   # "angularaxis": {"showticklabels":False,
-                                   #                 "ticks": ""}
-                                   })
+                                   },
+                            legend={"title": None}
+                            )
+        # radar.update_traces(fill="toself")
         st.plotly_chart(radar, use_container_width=True)
 
 
