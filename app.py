@@ -8,13 +8,13 @@ import itertools
 import plotly.express as px
 from plot_setup import finastra_theme
 import numpy as np
+import os
 #import networkx as nx
 #import nx_altair as nxa
 #from Graph import graph_creator
 
 
 ####### CACHED FUNCTIONS ######
-#Filter companies by esg category and start and end date
 @st.cache(show_spinner=False, suppress_st_warning=True)
 def filter_company_data(df_company, esg_categories, start, end):
     #Filter E,S,G Categories
@@ -30,14 +30,40 @@ def filter_company_data(df_company, esg_categories, start, end):
 
 @st.cache(show_spinner=False, suppress_st_warning=True,
           allow_output_mutation=True)
-def load_data():
-    df_conn = pd.read_csv("Data/newGconnections_10days.csv")
-    df_data = pd.read_csv("Data/10daysample.csv",parse_dates=['DATE'],infer_datetime_format=True)
+def load_data(base_dir):
+    data = {}
+    # Load connections
+    data["conn"] = pd.read_csv(os.path.join(base_dir, "connections.csv"))
+
+    # article data
+    data_path = os.path.join(base_dir, "data_as_csv.csv")
+    df_data = pd.read_csv(data_path, parse_dates=["DATE"],
+                          infer_datetime_format=True)
     df_data["DATE"] = df_data["DATE"].dt.date
-    companies = df_data.Organization.sort_values(ascending=True).unique().tolist()
+    data["data"] = df_data
+
+    # Find unique companies
+    companies = df_data.Organization.sort_values().unique().tolist()
     companies.insert(0,"Select a Company")
-    embeddings = pd.read_csv("Data/newGembeddings_10day.csv")
-    return df_conn, df_data, companies, embeddings
+    embeddings = pd.read_csv(os.path.join(base_dir, "pca_embeddings.csv"))
+    data["embed"] = embeddings
+
+    # Load ESG data tables
+    esg_dir = os.path.join(base_dir, "ESG")
+    data["overall_score"] = pd.read_csv(os.path.join(esg_dir,
+        "overall_daily_esg_scores.csv"), parse_dates=["date"],
+        infer_datetime_format=True, index_col="date")
+    data["E_score"] = pd.read_csv(os.path.join(esg_dir, "daily_E_score.csv"),
+                                  parse_dates=["date"],
+                                  infer_datetime_format=True, index_col="date")
+    data["S_score"] = pd.read_csv(os.path.join(esg_dir, "daily_S_score.csv"),
+                                  parse_dates=["date"],
+                                  infer_datetime_format=True, index_col="date")
+    data["G_score"] = pd.read_csv(os.path.join(esg_dir, "daily_G_score.csv"),
+                                  parse_dates=["date"],
+                                  infer_datetime_format=True, index_col="date")
+    data["ESG"] = pd.read_csv(os.path.join(esg_dir, "average_esg_scores.csv"))
+    return data, companies
 
 
 @st.cache(show_spinner=False,suppress_st_warning=True)
@@ -47,17 +73,35 @@ def filter_publisher(df_company,publisher):
     return df_company
 
 
+def get_melted_frame(data_dict, frame_names, keepcol=None, dropcol=None):
+    if keepcol:
+        reduced = {k: df[keepcol].rename(k) for k, df in data_dict.items()
+                   if k in frame_names}
+    else:
+        reduced = {k: df.drop(columns=dropcol).mean(axis=1).rename(k)
+                   for k, df in data_dict.items() if k in frame_names}
+    df = (pd.concat(list(reduced.values()), axis=1).reset_index().melt("date")
+            .sort_values("date").ffill())
+    df.columns = ["DATE", "ESG", "Score"]
+    return df
+
+
+def filter_melted_date(df, start, end, date_col="DATE"):
+    df = df[(df[date_col] >= pd.to_datetime(start)) &
+            (df[date_col] <= pd.to_datetime(end))]
+    return df
+
+
 ###### CUSTOMIZE COLOR THEME ######
-# alt.themes.register("finastra", finastra_theme)
-# alt.themes.enable("finastra")
-# print(alt.themes.names())
+alt.themes.register("finastra", finastra_theme)
+alt.themes.enable("finastra")
+violet, fuchsia = ["#694ED6", "#C137A2"]
 
 
 ###### SET UP PAGE ######
 icon_path = "esg_ai_logo.png"
 st.set_page_config(page_title="ESG AI", page_icon=icon_path,
                    layout='centered', initial_sidebar_state='auto')
-violet, fuchsia = ["#694ED6", "#C137A2"]
 _, logo, _ = st.beta_columns(3)
 logo.image(icon_path, width=200)
 style = ("text-align:center; padding: 0px; font-family: arial black;, "
@@ -67,12 +111,22 @@ st.write(title, unsafe_allow_html=True)
 
 
 ###### LOAD DATA ######
-df_conn, df_data, companies, embeddings = load_data()
+base_path = os.path.join("Data", "dec1_to_dec10")
+data, companies = load_data(base_path)
+df_conn = data["conn"]
+df_data = data["data"]
+embeddings = data["embed"]
 
 
 ####### CREATE SIDEBAR CATEGORY FILTER######
+st.sidebar.title("Filter Options")
+date_place = st.sidebar.empty()
 esg_categories = st.sidebar.multiselect("Select News Categories",
                                         ["E", "S", "G"], ["E", "S", "G"])
+
+
+
+
 
 
 ###### RUN COMPUTATIONS WHEN A COMPANY IS SELECTED ######
@@ -80,19 +134,32 @@ company = st.selectbox("Select a Company to Analyze", companies)
 if company and company != "Select a Company":
     ###### FILTER ######
     df_company = df_data[df_data.Organization == company]
+    diff_col = f"{company.replace(' ', '_')}_diff"
+    esg_keys = ["E_score", "S_score", "G_score"]
+    esg_df = get_melted_frame(data, esg_keys, keepcol=diff_col)
+    ind_esg_df = get_melted_frame(data, esg_keys, dropcol="industry_tone")
+    tone_df = get_melted_frame(data, ["overall_score"], keepcol=diff_col)
+    ind_tone_df = get_melted_frame(data, ["overall_score"],
+                                   dropcol="industry_tone")
 
 
     ###### DATE WIDGET ######
     start = df_company.DATE.min()
     end = df_company.DATE.max()
-    selected_dates = st.date_input("Select a Date Range", value=[start, end],
-                                   min_value=start, max_value=end, key=None)
+    # selected_dates = st.date_input("Select a Date Range", value=[start, end],
+    #                                min_value=start, max_value=end, key=None)
+    selected_dates = date_place.date_input("Select a Date Range",
+        value=[start, end], min_value=start, max_value=end, key=None)
     time.sleep(0.8)  #Allow user some time to select the two dates -- hacky :D
     start, end = selected_dates
 
 
     ###### FILTER DATA ######
     df_company = filter_company_data(df_company, esg_categories, start, end)
+    esg_df = filter_melted_date(esg_df, start, end)
+    ind_esg_df = filter_melted_date(ind_esg_df, start, end)
+    tone_df = filter_melted_date(tone_df, start, end)
+    ind_tone_df = filter_melted_date(ind_tone_df, start, end)
 
 
     ###### PUBLISHER SELECT BOX ######
@@ -104,6 +171,8 @@ if company and company != "Select a Company":
 
     ###### DISPLAY DATA ######
     URL_Expander = st.beta_expander(f"View {company.title()} Data:", True)
+    URL_Expander.write(f"### {len(df_company):,d} Matching Articles for " +
+                       company.title())
     display_cols = ["DATE", "SourceCommonName", "URL", "Tone", "Polarity",
                     "ActivityDensity", "SelfDensity"]  #  "WordCount"
     URL_Expander.write(df_company[display_cols])
@@ -112,25 +181,66 @@ if company and company != "Select a Company":
 
     ###### CHART: METRIC OVER TIME ######
     st.write("<br>", unsafe_allow_html=True)
-    st.write("<center><h3>ESG Trend Over Time</h3></center>",
-             unsafe_allow_html=True)
-    st.write("<br>", unsafe_allow_html=True)
     col1, col2 = st.beta_columns((1, 3))
 
     metric_options = ["Tone", "NegativeTone", "PositiveTone", "Polarity",
-                      "ActivityDensity", "WordCount"]
+                      "ActivityDensity", "WordCount", "Overall Score",
+                      "ESG Scores"]
     line_metric = col1.radio("Choose Metric", options=metric_options)
 
-    df_metr = df_company.groupby("DATE")[line_metric].mean().reset_index()
-    df_metr.columns = ["DATE", line_metric]
+    if line_metric == "ESG Scores":
+        # Get ESG scores
+        esg_df["WHO"] = company.title()
+        ind_esg_df["WHO"] = "Industry Average"
+        esg_plot_df = pd.concat([esg_df, ind_esg_df]).reset_index(drop=True)
+        esg_plot_df.replace({"E_score": "Environment", "S_score": "Social",
+                             "G_score": "Governance"}, inplace=True)
 
-    esg_tone_chart = alt.Chart(df_metr).mark_line(point=True, #color=fuchsia
-                        ).encode(
-        x=alt.X("yearmonthdate(DATE):O", title="DATE"),
-        y=line_metric,
-        tooltip=["DATE", alt.Tooltip(line_metric, format=".3f"),]
-    ).interactive()
-    col2.altair_chart(esg_tone_chart, use_container_width=True)
+        metric_chart = alt.Chart(esg_plot_df, title="Trends Over Time"
+                                   ).mark_line().encode(
+            x=alt.X("yearmonthdate(DATE):O", title="DATE"),
+            y="Score:Q",
+            # color=alt.Color("ESG:O", sort=None, legend=alt.Legend(
+            #     orient="top", title=None)),
+            color=alt.Color("ESG", sort=None, legend=alt.Legend(
+                title=None, orient="top")),
+            strokeDash=alt.StrokeDash("WHO", sort=None, legend=alt.Legend(
+                title=None, symbolType="stroke", symbolFillColor="gray",
+                symbolStrokeWidth=4, orient="top")
+                                      ),
+            tooltip=["DATE", "ESG", alt.Tooltip("Score", format=".5f")]
+            )
+
+    else:
+        if line_metric == "Overall Score":
+            line_metric = "Score"
+            tone_df["WHO"] = company.title()
+            ind_tone_df["WHO"] = "Industry Average"
+            plot_df = pd.concat([tone_df, ind_tone_df]).reset_index(drop=True)
+        else:
+            df1 = df_company.groupby("DATE")[line_metric].mean().reset_index()
+            df2 = df_data.groupby("DATE")[line_metric].mean().reset_index()
+            df1["WHO"] = company.title()
+            df2["WHO"] = "Industry Average"
+            plot_df = pd.concat([df1, df2]).reset_index(drop=True)
+        metric_chart = alt.Chart(plot_df, title="Trends Over Time"
+                                 ).mark_line().encode(
+            x=alt.X("yearmonthdate(DATE):O", title="DATE"),
+            y=f"{line_metric}:Q",
+            color=alt.Color("WHO", legend=None),
+            strokeDash=alt.StrokeDash("WHO", sort=None,
+                legend=alt.Legend(
+                    title=None, symbolType="stroke", symbolFillColor="gray",
+                    symbolStrokeWidth=4, orient="top",
+                    ),
+                ),
+            tooltip=["DATE", line_metric]
+            )
+    metric_chart = metric_chart.properties(height=340).interactive()
+    col2.altair_chart(metric_chart, use_container_width=True)
+
+
+
 
     extra_tone_options = ["Show Connection Avg", "Show Index Avg"]
 
@@ -145,6 +255,8 @@ if company and company != "Select a Company":
         y=alt.Y('URL:N', title="URL"),
         color=alt.Color('value:Q', title="Tone Intensity"),
         tooltip=["URL"]
+        ).properties(
+            height=350
         ).interactive()
     heatmap_Expander.altair_chart(heatmap, use_container_width=True)
 
@@ -161,6 +273,8 @@ if company and company != "Select a Company":
                  alt.Tooltip("DATE"),
                  alt.Tooltip("WordCount", format=",d"),
                  alt.Tooltip("SourceCommonName", title="Site")]
+        ).properties(
+            height=450
         ).interactive()
     st.altair_chart(scatter, use_container_width=True)
 
@@ -182,7 +296,9 @@ if company and company != "Select a Company":
         x="Confidence:Q",
         y=alt.Y("Neighbor:N", sort="-x"),
         tooltip=["Neighbor", alt.Tooltip("Confidence", format=".3f")],
-        color=alt.Color("Confidence:Q", scale=alt.Scale()),
+        color=alt.Color("Confidence:Q", scale=alt.Scale(), legend=None)
+    ).properties(
+        height=40 * num_neighbors
     ).configure_axis(grid=False)
     st.altair_chart(conf_plot, use_container_width=True)
 
@@ -191,14 +307,36 @@ if company and company != "Select a Company":
     color_f = lambda f: f"Company: {company.title()}" if f == company else (
         "Connected Company" if f in neighbors.values else "Other Company")
     embeddings["colorCode"] = embeddings.company.apply(color_f)
-    fig_3d = px.scatter_3d(embeddings, x="0", y="1", z="2", color='colorCode',
-                           color_discrete_sequence=["lightgrey", fuchsia,
-                           violet], opacity=0.5,
-                           hover_data={"company": True, "colorCode": True,
-                                       "0": False, "1": False, "2": False})
+    point_colors = {company: violet, "Connected Company": fuchsia,
+                    "Other Company": "lightgrey"}
+    fig_3d = px.scatter_3d(embeddings, x="0", y="1", z="2",
+                           color='colorCode',
+                           color_discrete_map=point_colors,
+                           opacity=0.4,
+                           hover_name="company",
+                           hover_data={c: False for c in embeddings.columns},
+                           )
+    fig_3d.update_layout(legend={"orientation": "h",
+                                 "yanchor": "bottom",
+                                 "title": None},
+                         title={"text": "<b>Company Connections</b>",
+                                "x": 0.5, "y": 0.9,
+                                "xanchor": "center",
+                                "yanchor": "top",
+                                "font": {"family": "Futura", "size": 23}},
+                         scene={"xaxis": {"visible": False},
+                                "yaxis": {"visible": False},
+                                "zaxis": {"visible": False}},
+                         margin={"l": 0, "r": 0, "t": 0, "b": 0},
+                         )
     st.plotly_chart(fig_3d, use_container_width=True)
 
 
+    # ###### CHART: AVERAGE ESG TONES ######
+    # avg_esg = data["ESG"]
+    # avg_esg.rename(columns={"Unnamed: 0": "Type"}, inplace=True)
+    # avg_esg = avg_esg.melt("Type")
+    # st.table(avg_esg)
 
     ###### CONNECTION HISTOGRAM WITH ESG SCORE/METRIC ######
     # source = pd.DataFrame({
@@ -219,3 +357,4 @@ if company and company != "Select a Company":
     #     alt.Color('Experiment:N')
     # ).interactive()
     # st.altair_chart(layered_hist,use_container_width=True)
+alt.themes.enable("default")
