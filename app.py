@@ -52,7 +52,7 @@ def get_melted_frame(data_dict, frame_names, keepcol=None, dropcol=None):
     df = (pd.concat(list(reduced.values()), axis=1).reset_index().melt("date")
             .sort_values("date").ffill())
     df.columns = ["DATE", "ESG", "Score"]
-    return df
+    return df.reset_index(drop=True)
 
 
 def filter_on_date(df, start, end, date_col="DATE"):
@@ -70,7 +70,7 @@ def main(start, end):
     ###### SET UP PAGE ######
     icon_path = "esg_ai_logo.png"
     st.set_page_config(page_title="ESG AI", page_icon=icon_path,
-                       layout='centered', initial_sidebar_state='auto')
+                       layout='centered', initial_sidebar_state="collapsed")
     _, logo, _ = st.beta_columns(3)
     logo.image(icon_path, width=200)
     style = ("text-align:center; padding: 0px; font-family: arial black;, "
@@ -161,7 +161,8 @@ def main(start, end):
             # Get ESG scores
             esg_df["WHO"] = company.title()
             ind_esg_df["WHO"] = "Industry Average"
-            esg_plot_df = pd.concat([esg_df, ind_esg_df]).reset_index(drop=True)
+            esg_plot_df = pd.concat([esg_df, ind_esg_df]
+                                    ).reset_index(drop=True)
             esg_plot_df.replace({"E_score": "Environment", "S_score": "Social",
                                  "G_score": "Governance"}, inplace=True)
 
@@ -173,8 +174,7 @@ def main(start, end):
                     title=None, orient="top")),
                 strokeDash=alt.StrokeDash("WHO", sort=None, legend=alt.Legend(
                     title=None, symbolType="stroke", symbolFillColor="gray",
-                    symbolStrokeWidth=4, orient="top")
-                                          ),
+                    symbolStrokeWidth=4, orient="top")),
                 tooltip=["DATE", "ESG", alt.Tooltip("Score", format=".5f")]
                 )
 
@@ -185,8 +185,10 @@ def main(start, end):
                 ind_tone_df["WHO"] = "Industry Average"
                 plot_df = pd.concat([tone_df, ind_tone_df]).reset_index(drop=True)
             else:
-                df1 = df_company.groupby("DATE")[line_metric].mean().reset_index()
-                df2 = df_data.groupby("DATE")[line_metric].mean().reset_index()
+                df1 = df_company.groupby("DATE")[line_metric].mean(
+                    ).reset_index()
+                df2 = filter_on_date(df_data.groupby("DATE")[line_metric].mean(
+                    ).reset_index(), start, end)
                 df1["WHO"] = company.title()
                 df2["WHO"] = "Industry Average"
                 plot_df = pd.concat([df1, df2]).reset_index(drop=True)
@@ -210,6 +212,41 @@ def main(start, end):
         col2.altair_chart(metric_chart, use_container_width=True)
 
 
+        ###### CHART: ESG RADAR ######
+        col1, col2 = st.beta_columns((1, 2))
+        avg_esg = data["ESG"]
+        avg_esg.rename(columns={"Unnamed: 0": "Type"}, inplace=True)
+        avg_esg.replace({"T": "Overall", "E": "Environment",
+                         "S": "Social", "G": "Governance"}, inplace=True)
+        avg_esg["Industry Average"] = avg_esg.mean(axis=1)
+
+        radar_df = avg_esg[["Type", company, "Industry Average"]].melt("Type",
+            value_name="score", var_name="entity")
+
+        radar = px.line_polar(radar_df, r="score", theta="Type",
+            color="entity", line_close=True, hover_name="Type",
+            hover_data={"Type": True, "entity": True, "score": ":.2f"},
+            color_discrete_map={"Industry Average": fuchsia, company: violet})
+        radar.update_layout(template=None,
+                            polar={
+                                   "radialaxis": {"showticklabels": False,
+                                                  "ticks": ""},
+                                   "angularaxis": {"showticklabels": False,
+                                                   "ticks": ""},
+                                   },
+                            legend={"title": None, "yanchor": "middle",
+                                    "orientation": "h"},
+                            title={"text": "<b>ESG Scores</b>",
+                                   "x": 0.5, "y": 0.8875,
+                                   "xanchor": "center",
+                                   "yanchor": "top",
+                                   "font": {"family": "Futura", "size": 23}},
+                            margin={"l": 5, "r": 5, "t": 0, "b": 0},
+                            )
+        radar.update_layout(showlegend=False)
+        col1.plotly_chart(radar, use_container_width=True)
+
+
         ###### CHART: DOCUMENT TONE DISTRIBUTION #####
         # add overall average
         dist_chart = alt.Chart(df_company, title="Document Tone "
@@ -222,13 +259,16 @@ def main(start, end):
                     tooltip=[alt.Tooltip("Tone", format=".3f"),
                              alt.Tooltip("density:Q", format=".4f")]
                 ).properties(
-                    height=300,
+                    height=325,
+                ).configure_title(
+                    dy=-20
                 ).interactive()
-        st.altair_chart(dist_chart,use_container_width=True)
+        col2.markdown("### <br>", unsafe_allow_html=True)
+        col2.altair_chart(dist_chart,use_container_width=True)
 
 
         ###### CHART: SCATTER OF ARTICLES OVER TIME #####
-        st.markdown("---")
+        # st.markdown("---")
         scatter = alt.Chart(df_company, title="Article Tone").mark_circle().encode(
             x="NegativeTone:Q",
             y="PositiveTone:Q",
@@ -284,7 +324,6 @@ def main(start, end):
 
         ###### CHART: NEIGHBOR SIMILIARITY ######
         st.markdown("---")
-        p1, p2 = st.beta_columns([2, 1])
         neighbor_conf = pd.DataFrame({
             "Neighbor": neighbors,
             "Confidence": company_df[[f"n{i}_conf" for i in
@@ -298,41 +337,41 @@ def main(start, end):
         ).properties(
             height=25 * num_neighbors + 100
         ).configure_axis(grid=False)
-        p1.altair_chart(conf_plot, use_container_width=True)
+        st.altair_chart(conf_plot, use_container_width=True)
 
 
-        ###### CHART: ESG RADAR ######
-        avg_esg = data["ESG"]
-        avg_esg.rename(columns={"Unnamed: 0": "Type"}, inplace=True)
-        avg_esg.replace({"T": "Overall", "E": "Environment",
-                         "S": "Social", "G": "Governance"}, inplace=True)
-        avg_esg["Industry Average"] = avg_esg.mean(axis=1)
-
-        radar_df = avg_esg[["Type", company, "Industry Average"]].melt("Type",
-            value_name="score", var_name="entity")
-
-        radar = px.line_polar(radar_df, r="score", theta="Type",
-            color="entity", line_close=True, hover_name="Type",
-            hover_data={"Type": True, "entity": True, "score": ":.2f"},
-            color_discrete_map={"Industry Average": fuchsia, company: violet})
-        radar.update_layout(template=None,
-                            polar={
-                                   "radialaxis": {"showticklabels": False,
-                                                  "ticks": ""},
-                                   "angularaxis": {"showticklabels": False,
-                                                   "ticks": ""},
-                                   },
-                            legend={"title": None, "yanchor": "middle",
-                                    "orientation": "h"},
-                            title={"text": "<b>ESG Scores</b>",
-                                   "x": 0.5, "y": 0.9,
-                                   "xanchor": "center",
-                                   "yanchor": "top",
-                                   "font": {"family": "Futura", "size": 23}},
-                            margin={"l": 5, "r": 5, "t": 100, "b": 100},
-                            )
-        # radar.update_traces(fill="toself")
-        p2.plotly_chart(radar, use_container_width=True)
+        # ###### CHART: ESG RADAR ######
+        # avg_esg = data["ESG"]
+        # avg_esg.rename(columns={"Unnamed: 0": "Type"}, inplace=True)
+        # avg_esg.replace({"T": "Overall", "E": "Environment",
+        #                  "S": "Social", "G": "Governance"}, inplace=True)
+        # avg_esg["Industry Average"] = avg_esg.mean(axis=1)
+        #
+        # radar_df = avg_esg[["Type", company, "Industry Average"]].melt("Type",
+        #     value_name="score", var_name="entity")
+        #
+        # radar = px.line_polar(radar_df, r="score", theta="Type",
+        #     color="entity", line_close=True, hover_name="Type",
+        #     hover_data={"Type": True, "entity": True, "score": ":.2f"},
+        #     color_discrete_map={"Industry Average": fuchsia, company: violet})
+        # radar.update_layout(template=None,
+        #                     polar={
+        #                            "radialaxis": {"showticklabels": False,
+        #                                           "ticks": ""},
+        #                            "angularaxis": {"showticklabels": False,
+        #                                            "ticks": ""},
+        #                            },
+        #                     legend={"title": None, "yanchor": "middle",
+        #                             "orientation": "h"},
+        #                     title={"text": "<b>ESG Scores</b>",
+        #                            "x": 0.5, "y": 0.9,
+        #                            "xanchor": "center",
+        #                            "yanchor": "top",
+        #                            "font": {"family": "Futura", "size": 23}},
+        #                     margin={"l": 5, "r": 5, "t": 100, "b": 100},
+        #                     )
+        # # radar.update_traces(fill="toself")
+        # p2.plotly_chart(radar, use_container_width=True)
 
     alt.themes.enable("default")
 
