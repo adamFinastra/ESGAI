@@ -1,54 +1,55 @@
 import pandas as pd
-
-
-def pd_drive(key, **kwargs):
-    url = f"https://drive.google.com/uc?export=download&id={key}"
-    return pd.read_csv(url, **kwargs)
+import numpy as np
+import os
 
 class Data:
-    def ten_days(self):
-        # Public google drive download keys:
-        self.connections = "1_u1qHVNElC3aeFcY7UKBXlUBXxJBig9Y"
-        self.data = "1obwJfVNACfIXhDcasVVcS8N6yiHLNrTI"
-        self.embeddings = "1X-GshQBzXO9HgPi_4R0VuVtsR-SXtrMM"
-        self.avg_esg = "1FIB_zV0xpZNAEiE-HbBD4GPcndU3aZqK"
-        self.daily_esg = "1VJhHBieTX-SbLl76EcJSp40YQOJHBaPi"
-        self.e_score = "1D9l9YZnRZNY4fTt-MjnQkFsVF2DsCSMJ"
-        self.s_score = "1Z1WVo7LF1DtbDdwsXZnrqwPovJIdKjrY"
-        self.g_score = "13ChPglmN1FKLkHErPICD7GcsSCeyDDkM"
 
-    def one_month(self):
-        self.connections = "1PqPHIw7-4qC7lBxNZWGtXQmhidHgwtNa"
-        self.data = "1EX4Uf1-JiXKEGrwx6Pe9Dc6IJ35kD-D_"
-        self.embeddings = "11h4A3quq90DT_JIoUzZx70VpZO-CBnX2"
-        self.avg_esg = "1ZfIizZH7IKwXtX-MaqZJlr7yz0kTnmMs"
-        self.daily_esg = "1Skip5ZNaoZemObSTRaG9Dl_AszwArcfA"
-        self.e_score = "1QeL87KIUM5H1QiJe5Hgw2hXtrgszgE4-"
-        self.s_score = "1VgiCFGJzA_99zSKUu_bylwxddtTIxMwe"
-        self.g_score = "1iCWEofQjlHHrn-CeOtGJIkPKcYl1jLUh"
+    def paths(self, data_path):
+        # Paths to data files
+        self.connections = os.path.join(data_path, "connections.csv")
+        self.data = os.path.join(data_path, "data_as_csv.csv")
+        self.embeddings = os.path.join(data_path, "pca_embeddings.csv")
+        esg_path = os.path.join(data_path, "ESG")
+        self.avg_esg = os.path.join(esg_path, "average_esg_scores.csv")
+        self.daily_esg = os.path.join(esg_path, "overall_daily_esg_scores.csv")
+        self.e_score = os.path.join(esg_path, "daily_E_score.csv")
+        self.s_score = os.path.join(esg_path, "daily_S_score.csv")
+        self.g_score =os.path.join(esg_path, "daily_S_score.csv")
+
+
 
     def read(self, time_period="ten_days"):
         if time_period == "ten_days":
-            self.ten_days()
-        elif time_period == "one_month":
-            self.one_month()
+            data_path = os.path.join("Data", "dec1_to_dec10")
+        # elif time_period == "one_month":
+        #     data_path = os.path.join("Data", "nov11_to_dec12")
         else:
             print("We don't have data for that")
             return
+        self.paths(data_path)
 
-        data = {"conn": pd_drive(self.connections),
-                "data": pd_drive(self.data, parse_dates=["DATE"],
+        data = {"conn": pd.read_csv(self.connections),
+                "data": pd.read_csv(self.data, parse_dates=["DATE"],
                                  infer_datetime_format=True),
-                "embed": pd_drive(self.embeddings),
-                "overall_score": pd_drive(self.daily_esg, parse_dates=["date"],
+                "embed": pd.read_csv(self.embeddings),
+                "overall_score": pd.read_csv(self.daily_esg,
+                                  index_col="date", parse_dates=["date"],
+                                 infer_datetime_format=True),
+                "E_score": pd.read_csv(self.e_score, parse_dates=["date"],
                                  infer_datetime_format=True, index_col="date"),
-                "E_score": pd_drive(self.e_score, parse_dates=["date"],
+                "S_score": pd.read_csv(self.s_score, parse_dates=["date"],
                                  infer_datetime_format=True, index_col="date"),
-                "S_score": pd_drive(self.s_score, parse_dates=["date"],
+                "G_score": pd.read_csv(self.g_score, parse_dates=["date"],
                                  infer_datetime_format=True, index_col="date"),
-                "G_score": pd_drive(self.g_score, parse_dates=["date"],
-                                 infer_datetime_format=True, index_col="date"),
-                "ESG": pd_drive(self.avg_esg),
+                "ESG": pd.read_csv(self.avg_esg),
                 }
+        # Dat column to date (not timestamp)
         data["data"]["DATE"] = data["data"]["DATE"].dt.date
+
+        # Multiply tones by large number
+        esg_tables = ["E_score", "S_score", "G_score", "overall_score", "ESG"]
+        for t in esg_tables:
+            num_cols = data[t].select_dtypes(include=["number"]).columns
+            data[t][num_cols] *= 10000
+
         return data

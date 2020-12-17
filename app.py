@@ -10,10 +10,6 @@ import itertools
 import plotly.express as px
 from plot_setup import finastra_theme
 from download_data import Data
-#import networkx as nx
-#import nx_altair as nxa
-#from Graph import graph_creator
-
 
 ####### CACHED FUNCTIONS ######
 @st.cache(show_spinner=False, suppress_st_warning=True)
@@ -31,8 +27,9 @@ def filter_company_data(df_company, esg_categories, start, end):
 
 @st.cache(show_spinner=False, suppress_st_warning=True,
           allow_output_mutation=True)
-def load_data(base_dir):
+def load_data():
     data = Data().read("ten_days")
+    # data = Data().read("one_month")
     companies = data["data"].Organization.sort_values().unique().tolist()
     companies.insert(0,"Select a Company")
     return data, companies
@@ -58,7 +55,7 @@ def get_melted_frame(data_dict, frame_names, keepcol=None, dropcol=None):
     return df
 
 
-def filter_melted_date(df, start, end, date_col="DATE"):
+def filter_on_date(df, start, end, date_col="DATE"):
     df = df[(df[date_col] >= pd.to_datetime(start)) &
             (df[date_col] <= pd.to_datetime(end))]
     return df
@@ -83,9 +80,8 @@ def main(start, end):
 
 
     ###### LOAD DATA ######
-    base_path = os.path.join("Data", f"{start}_to_{end}")
     with st.spinner(text="Fetching Data..."):
-        data, companies = load_data(base_path)
+        data, companies = load_data()
     df_conn = data["conn"]
     df_data = data["data"]
     embeddings = data["embed"]
@@ -96,7 +92,8 @@ def main(start, end):
     date_place = st.sidebar.empty()
     esg_categories = st.sidebar.multiselect("Select News Categories",
                                             ["E", "S", "G"], ["E", "S", "G"])
-
+    pub = st.sidebar.empty()
+    num_neighbors = st.sidebar.slider("Number of Connections", 1, 20, value=8)
 
 
 
@@ -119,8 +116,6 @@ def main(start, end):
         ###### DATE WIDGET ######
         start = df_company.DATE.min()
         end = df_company.DATE.max()
-        # selected_dates = st.date_input("Select a Date Range", value=[start, end],
-        #                                min_value=start, max_value=end, key=None)
         selected_dates = date_place.date_input("Select a Date Range",
             value=[start, end], min_value=start, max_value=end, key=None)
         time.sleep(0.8)  #Allow user some time to select the two dates -- hacky :D
@@ -128,17 +123,19 @@ def main(start, end):
 
 
         ###### FILTER DATA ######
-        df_company = filter_company_data(df_company, esg_categories, start, end)
-        esg_df = filter_melted_date(esg_df, start, end)
-        ind_esg_df = filter_melted_date(ind_esg_df, start, end)
-        tone_df = filter_melted_date(tone_df, start, end)
-        ind_tone_df = filter_melted_date(ind_tone_df, start, end)
+        df_company = filter_company_data(df_company, esg_categories,
+                                         start, end)
+        esg_df = filter_on_date(esg_df, start, end)
+        ind_esg_df = filter_on_date(ind_esg_df, start, end)
+        tone_df = filter_on_date(tone_df, start, end)
+        ind_tone_df = filter_on_date(ind_tone_df, start, end)
+        date_filtered = filter_on_date(df_data, start, end)
 
 
         ###### PUBLISHER SELECT BOX ######
         publishers = df_company.SourceCommonName.sort_values().unique().tolist()
         publishers.insert(0, "all")
-        publisher = st.sidebar.selectbox("Select Publisher", publishers)
+        publisher = pub.selectbox("Select Publisher", publishers)
         df_company = filter_publisher(df_company, publisher)
 
 
@@ -149,11 +146,10 @@ def main(start, end):
         display_cols = ["DATE", "SourceCommonName", "URL", "Tone", "Polarity",
                         "ActivityDensity", "SelfDensity"]  #  "WordCount"
         URL_Expander.write(df_company[display_cols])
-        st.write("<br>", unsafe_allow_html=True)
 
 
         ###### CHART: METRIC OVER TIME ######
-        st.write("<br>", unsafe_allow_html=True)
+        st.markdown("---")
         col1, col2 = st.beta_columns((1, 3))
 
         metric_options = ["Tone", "NegativeTone", "PositiveTone", "Polarity",
@@ -172,9 +168,7 @@ def main(start, end):
             metric_chart = alt.Chart(esg_plot_df, title="Trends Over Time"
                                        ).mark_line().encode(
                 x=alt.X("yearmonthdate(DATE):O", title="DATE"),
-                y="Score:Q",
-                # color=alt.Color("ESG:O", sort=None, legend=alt.Legend(
-                #     orient="top", title=None)),
+                y=alt.Y("Score:Q"),
                 color=alt.Color("ESG", sort=None, legend=alt.Legend(
                     title=None, orient="top")),
                 strokeDash=alt.StrokeDash("WHO", sort=None, legend=alt.Legend(
@@ -199,7 +193,7 @@ def main(start, end):
             metric_chart = alt.Chart(plot_df, title="Trends Over Time"
                                      ).mark_line().encode(
                 x=alt.X("yearmonthdate(DATE):O", title="DATE"),
-                y=f"{line_metric}:Q",
+                y=alt.Y(f"{line_metric}:Q", scale=alt.Scale(type="linear")),
                 color=alt.Color("WHO", legend=None),
                 strokeDash=alt.StrokeDash("WHO", sort=None,
                     legend=alt.Legend(
@@ -207,34 +201,34 @@ def main(start, end):
                         symbolStrokeWidth=4, orient="top",
                         ),
                     ),
-                tooltip=["DATE", line_metric]
+                tooltip=["DATE", alt.Tooltip(line_metric, format=".3f")]
                 )
-        metric_chart = metric_chart.properties(height=340).interactive()
+        metric_chart = metric_chart.properties(
+            height=340,
+            width=200
+        ).interactive()
         col2.altair_chart(metric_chart, use_container_width=True)
 
 
-
-
-        extra_tone_options = ["Show Connection Avg", "Show Index Avg"]
-
-
-        ###### CHART: HEATMAP OF DOCUMENT WITH FEATURES #####
-        heatmap_Expander = st.beta_expander("Document Tone  Analyzer", False)
-        df_heat = df_company[["URL","Tone"]]
-        df_heat["Tone"] = np.log2(df_heat.Tone)
-        df_heat = df_heat.melt(id_vars=["URL"]).sort_values(by='variable',ascending=False)
-        heatmap = alt.Chart(df_heat).mark_rect().encode(
-            x=alt.X('variable:N', title="Document Tone"),
-            y=alt.Y('URL:N', title="URL"),
-            color=alt.Color('value:Q', title="Tone Intensity"),
-            tooltip=["URL"]
-            ).properties(
-                height=350
-            ).interactive()
-        heatmap_Expander.altair_chart(heatmap, use_container_width=True)
+        ###### CHART: DOCUMENT TONE DISTRIBUTION #####
+        # add overall average
+        dist_chart = alt.Chart(df_company, title="Document Tone "
+                               "Distribution").transform_density(
+                density='Tone',
+                as_=["Tone", "density"]
+            ).mark_area(opacity=0.5,color="purple").encode(
+                    x=alt.X('Tone:Q', scale=alt.Scale(domain=(-10, 10))),
+                    y='density:Q',
+                    tooltip=[alt.Tooltip("Tone", format=".3f"),
+                             alt.Tooltip("density:Q", format=".4f")]
+                ).properties(
+                    height=300,
+                ).interactive()
+        st.altair_chart(dist_chart,use_container_width=True)
 
 
         ###### CHART: SCATTER OF ARTICLES OVER TIME #####
+        st.markdown("---")
         scatter = alt.Chart(df_company, title="Article Tone").mark_circle().encode(
             x="NegativeTone:Q",
             y="PositiveTone:Q",
@@ -252,31 +246,14 @@ def main(start, end):
         st.altair_chart(scatter, use_container_width=True)
 
 
-        ###### NUMBER OF NEIGHBORS TO FIND ######
-        num_neighbors = st.slider("Number of Connections", 1, 20, value=8)
+        ###### NUMBER OF NEIGHBORS TO FIND #####
         neighbor_cols = [f"n{i}_rec" for i in range(num_neighbors)]
         company_df = df_conn[df_conn.company == company]
         neighbors = company_df[neighbor_cols].iloc[0]
 
 
-        ###### CHART: NEIGHBOR SIMILIARITY ######
-        neighbor_conf = pd.DataFrame({
-            "Neighbor": neighbors,
-            "Confidence": company_df[[f"n{i}_conf" for i in
-                                      range(num_neighbors)]].values[0]})
-        conf_plot = alt.Chart(neighbor_conf, title="Connected Companies"
-                              ).mark_bar().encode(
-            x="Confidence:Q",
-            y=alt.Y("Neighbor:N", sort="-x"),
-            tooltip=["Neighbor", alt.Tooltip("Confidence", format=".3f")],
-            color=alt.Color("Confidence:Q", scale=alt.Scale(), legend=None)
-        ).properties(
-            height=40 * num_neighbors
-        ).configure_axis(grid=False)
-        st.altair_chart(conf_plot, use_container_width=True)
-
-
         ###### CHART: 3D EMBEDDING WITH NEIGHBORS ######
+        st.markdown("---")
         color_f = lambda f: f"Company: {company.title()}" if f == company else (
             "Connected Company" if f in neighbors.values else "Other Company")
         embeddings["colorCode"] = embeddings.company.apply(color_f)
@@ -305,6 +282,25 @@ def main(start, end):
         st.plotly_chart(fig_3d, use_container_width=True)
 
 
+        ###### CHART: NEIGHBOR SIMILIARITY ######
+        st.markdown("---")
+        p1, p2 = st.beta_columns([2, 1])
+        neighbor_conf = pd.DataFrame({
+            "Neighbor": neighbors,
+            "Confidence": company_df[[f"n{i}_conf" for i in
+                                      range(num_neighbors)]].values[0]})
+        conf_plot = alt.Chart(neighbor_conf, title="Connected Companies"
+                              ).mark_bar().encode(
+            x="Confidence:Q",
+            y=alt.Y("Neighbor:N", sort="-x"),
+            tooltip=["Neighbor", alt.Tooltip("Confidence", format=".3f")],
+            color=alt.Color("Confidence:Q", scale=alt.Scale(), legend=None)
+        ).properties(
+            height=25 * num_neighbors + 100
+        ).configure_axis(grid=False)
+        p1.altair_chart(conf_plot, use_container_width=True)
+
+
         ###### CHART: ESG RADAR ######
         avg_esg = data["ESG"]
         avg_esg.rename(columns={"Unnamed: 0": "Type"}, inplace=True)
@@ -317,40 +313,27 @@ def main(start, end):
 
         radar = px.line_polar(radar_df, r="score", theta="Type",
             color="entity", line_close=True, hover_name="Type",
-            hover_data={"Type": False, "entity": True, "score": ":.5f"},
+            hover_data={"Type": True, "entity": True, "score": ":.2f"},
             color_discrete_map={"Industry Average": fuchsia, company: violet})
         radar.update_layout(template=None,
                             polar={
                                    "radialaxis": {"showticklabels": False,
                                                   "ticks": ""},
+                                   "angularaxis": {"showticklabels": False,
+                                                   "ticks": ""},
                                    },
-                            legend={"title": None}
+                            legend={"title": None, "yanchor": "middle",
+                                    "orientation": "h"},
+                            title={"text": "<b>ESG Scores</b>",
+                                   "x": 0.5, "y": 0.9,
+                                   "xanchor": "center",
+                                   "yanchor": "top",
+                                   "font": {"family": "Futura", "size": 23}},
+                            margin={"l": 5, "r": 5, "t": 100, "b": 100},
                             )
         # radar.update_traces(fill="toself")
-        st.plotly_chart(radar, use_container_width=True)
+        p2.plotly_chart(radar, use_container_width=True)
 
-
-
-
-        ###### CONNECTION HISTOGRAM WITH ESG SCORE/METRIC ######
-        # source = pd.DataFrame({
-        # 'Trial A': np.random.normal(0, 0.8, 1000),
-        # 'Trial B': np.random.normal(-2, 1, 1000),
-        # 'Trial C': np.random.normal(3, 2, 1000)
-        # })
-        #
-        # layered_hist = alt.Chart(source).transform_fold(
-        #     ['Trial A', 'Trial B', 'Trial C'],
-        #     as_=['Experiment', 'Measurement']
-        # ).mark_area(
-        #     opacity=0.3,
-        #     interpolate='step'
-        # ).encode(
-        #     alt.X('Measurement:Q', bin=alt.Bin(maxbins=100)),
-        #     alt.Y('count()', stack=None),
-        #     alt.Color('Experiment:N')
-        # ).interactive()
-        # st.altair_chart(layered_hist,use_container_width=True)
     alt.themes.enable("default")
 
 if __name__ == "__main__":
